@@ -20,7 +20,7 @@ Accept a single connection, read a few bytes, and print them.
 
 Respond with a hard-coded HTTP response:
 
-let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello!";
+let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello!";  
 stream.write_all(response.as_bytes())?;
 
 
@@ -44,9 +44,9 @@ Print each request to stdout.
 
 Create a static/ directory:
 
-static/
-  ├─ index.html
-  └─ about.html
+static/  
+  ├─ index.html  
+  └─ about.html  
 
 
 In code:
@@ -63,9 +63,9 @@ Use std::fs::read to load file contents as Vec<u8>.
 
 Respond with:
 
-HTTP/1.1 200 OK
-Content-Type: text/html
-Content-Length: <len>
+HTTP/1.1 200 OK  
+Content-Type: text/html  
+Content-Length: <len>  
 
 <file-contents>
 
@@ -103,10 +103,10 @@ Print “Server running on 127.0.0.1:PORT”.
 
 Create reusable HttpResponse struct:
 
-struct HttpResponse {
-    status_line: String,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
+struct HttpResponse {  
+    status_line: String,  
+    headers: Vec<(String, String)>,  
+    body: Vec<u8>,  
 }
 
 
