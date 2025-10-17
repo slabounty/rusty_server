@@ -10,11 +10,14 @@ struct HttpRequest {
     path: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     env_logger::init();
     info!("Rusty Server");
 
+    start_server()
+}
+
+fn start_server() -> Result<()> {
     // Bind the TcpListener to an address
     let listener = TcpListener::bind("127.0.0.1:8080").expect("Failed to bind to address");
     info!("Listening on 127.0.0.1:8080");
@@ -24,7 +27,9 @@ async fn main() -> Result<()> {
         match stream {
             Ok(stream) => {
                 info!("New connection: {}", stream.peer_addr().unwrap());
-                handle_connection(stream)?;
+                if let Err(e) = handle_connection(stream) {
+                    error!("Error handling connection: {}", e);
+                }
             }
             Err(e) => {
                 error!("Error accepting connection: {}", e);
@@ -108,6 +113,41 @@ fn handle_response(stream: &mut TcpStream, request: &HttpRequest) -> std::io::Re
 mod tests {
     use super::*;
     use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn start_server_accepts_and_responds() {
+        // Start the server in a background thread
+        thread::spawn(|| {
+            // It runs forever, so we don’t join on it
+            start_server().unwrap();
+        });
+
+        // Give the server time to start
+        thread::sleep(Duration::from_millis(200));
+
+        // Connect as a client
+        let mut stream =
+            TcpStream::connect("127.0.0.1:8080").expect("Failed to connect to server");
+
+        // Send a minimal HTTP GET request
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .expect("Failed to write request");
+
+        // Read the response
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .expect("Failed to read response");
+
+        // Verify we got the expected body
+        assert!(
+            response.contains("Welcome to Rusty Server"),
+            "Unexpected response: {}",
+            response
+        );
+    }
 
     #[test]
     fn test_handle_connection_end_to_end() {
