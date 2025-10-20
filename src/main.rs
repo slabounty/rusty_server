@@ -1,5 +1,7 @@
-use std::net::{TcpListener, TcpStream};
+use std::fs;
 use std::io::{self, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 
 use anyhow::Result;
 use log::{info, error};
@@ -91,21 +93,34 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<String> {
 
 
 fn handle_response(stream: &mut TcpStream, request: &HttpRequest) -> std::io::Result<()> {
-    // Example: respond differently based on path
-    let body = if request.path == "/" {
-        "<h1>Welcome to Rusty Server</h1>"
-    } else {
-        "<h1>404 Not Found</h1>"
+    // Map the request path to a file under ./static/
+    info!("path = {}", request.path);
+
+    let path = match request.path.as_str() {
+        "/" => Path::new("static/index.html").to_path_buf(),
+        "/index" => Path::new("static/index.html").to_path_buf(),
+        "/about" => Path::new("static/about.html").to_path_buf(),
+        other => {
+            // Strip leading slash and append to static/
+            Path::new("static").join(&other.trim_start_matches('/'))
+        }
     };
 
+    // Try to read the file contents
+    let (status_line, body) = match fs::read_to_string(&path) {
+        Ok(contents) => ("HTTP/1.1 200 OK", contents),
+        Err(_) => ("HTTP/1.1 404 NOT FOUND", "<h1>404 Not Found</h1>".to_string()),
+    };
+
+    // Build and send the response
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
+        "{status_line}\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
     );
 
     stream.write_all(response.as_bytes())?;
     stream.flush()?;
+
     Ok(())
 }
 
@@ -338,6 +353,62 @@ mod tests {
         assert!(response.contains("<h1>Welcome to Rusty Server</h1>"));
     }
 
+    #[test]
+    fn test_handle_response_index_path() {
+        use std::io::{Read};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = thread::spawn(move || {
+            let (mut server_stream, _) = listener.accept().unwrap();
+            let request = HttpRequest {
+                method: "GET".to_string(),
+                path: "/index".to_string(),
+            };
+            handle_response(&mut server_stream, &request).unwrap();
+        });
+
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let mut response = String::new();
+        client_stream.read_to_string(&mut response).unwrap();
+
+        handle.join().unwrap();
+
+        assert!(response.contains("200 OK"), "Expected status line");
+        assert!(response.contains("<h2>This is the index.html file.</h2>"));
+    }
+
+    #[test]
+    fn test_handle_response_about_path() {
+        use std::io::{Read};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = thread::spawn(move || {
+            let (mut server_stream, _) = listener.accept().unwrap();
+            let request = HttpRequest {
+                method: "GET".to_string(),
+                path: "/about".to_string(),
+            };
+            handle_response(&mut server_stream, &request).unwrap();
+        });
+
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let mut response = String::new();
+        client_stream.read_to_string(&mut response).unwrap();
+
+        handle.join().unwrap();
+
+        assert!(response.contains("200 OK"), "Expected status line");
+        assert!(response.contains("<h2>This is the about.html file.</h2>"));
+    }
+
 
     #[test]
     fn test_handle_response_not_found() {
@@ -363,8 +434,16 @@ mod tests {
 
         handle.join().unwrap();
 
-        assert!(response.contains("200 OK"), "Expected HTTP 200 line");
-        assert!(response.contains("404 Not Found"), "Expected 404 body");
+        assert!(
+            response.contains("404 NOT FOUND"),
+            "Expected HTTP 404 line, got: {}",
+            response
+        );
+        assert!(
+            response.contains("404 Not Found"),
+            "Expected 404 body, got: {}",
+            response
+        );
     }
 
 
