@@ -1,12 +1,12 @@
+use log::info;
+use std::fs;
 use std::io::{Write};
 use std::net::TcpStream;
-use log::info;
+use std::path::Path;
 
 use crate::request::HttpRequest;
 
 pub fn handle_response(stream: &mut TcpStream, request: &HttpRequest) -> std::io::Result<()> {
-    use std::path::Path;
-    use std::fs;
 
     let path_str = match request.path.as_str() {
         "/" | "/index" => "static/index.html",
@@ -30,10 +30,7 @@ pub fn handle_response(stream: &mut TcpStream, request: &HttpRequest) -> std::io
     // Read the file contents as bytes
     let (status_line, body) = match fs::read(&path) {
         Ok(contents) => ("HTTP/1.1 200 OK", contents),
-        Err(_) => {
-            let not_found = b"<h1>404 Not Found</h1>".to_vec();
-            ("HTTP/1.1 404 NOT FOUND", not_found)
-        }
+        Err(_) => ("HTTP/1.1 404 NOT FOUND", handle_404())
     };
 
     // Build and send the response
@@ -49,9 +46,24 @@ pub fn handle_response(stream: &mut TcpStream, request: &HttpRequest) -> std::io
     Ok(())
 }
 
+fn handle_404() -> Vec<u8> {
+    let path_str = "static/404.html";
+    let path = Path::new(path_str);
+
+    // Read the 404 file and if it's not there, just generate one.
+    match fs::read(&path) {
+        Ok(contents) => contents,
+        Err(_) => {
+            b"<h1>404 Not Found</h1>".to_vec()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_handle_response_root_path() {
@@ -234,7 +246,7 @@ mod tests {
             response
         );
         assert!(
-            response.contains("404 Not Found"),
+            response.contains("This is the 404 file."),
             "Expected 404 body, got: {}",
             response
         );
@@ -268,5 +280,56 @@ mod tests {
         let len_val: usize = len_line.split(':').nth(1).unwrap().trim().parse().unwrap();
         let body = response.split("\r\n\r\n").nth(1).unwrap();
         assert_eq!(body.len(), len_val, "Content-Length header should match actual body size");
+    }
+
+    #[test]
+    fn test_handle_404_file_exists() {
+        // Create a temporary directory that mimics the project structure
+        let dir = tempdir().unwrap();
+        let static_dir = dir.path().join("static");
+        fs::create_dir_all(&static_dir).unwrap();
+
+        // Write a temporary 404.html file
+        let expected_content = b"<h1>Custom 404 Page</h1>";
+        let file_path = static_dir.join("404.html");
+        fs::write(&file_path, expected_content).unwrap();
+
+        // Temporarily change the working directory so handle_404() finds our temp file
+        let old_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        // Call the function
+        let result = handle_404();
+
+        // Restore working directory
+        std::env::set_current_dir(old_cwd).unwrap();
+
+        // Assert: it should read the file content
+        assert_eq!(result, expected_content, "Should return contents of 404.html");
+    }
+
+    #[test]
+    fn test_handle_404_file_missing() {
+        // Create a temporary directory with no 404.html
+        let dir = tempdir().unwrap();
+        let static_dir = dir.path().join("static");
+        fs::create_dir_all(&static_dir).unwrap();
+
+        // Temporarily change working directory so handle_404() looks here
+        let old_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        // Call the function (no static/404.html exists)
+        let result = handle_404();
+
+        // Restore working directory
+        std::env::set_current_dir(old_cwd).unwrap();
+
+        // Assert: it should return the fallback HTML
+        assert_eq!(
+            result,
+            b"<h1>404 Not Found</h1>",
+            "Should return default 404 content when file missing"
+        );
     }
 }
