@@ -6,17 +6,18 @@ use log::{info, error};
 use crate::request::{read_request, parse_request};
 use crate::response::handle_response;
 
-pub fn start_server() -> Result<()> {
+pub fn start_server(port: u16, root: &str) -> Result<()> {
     // Bind the TcpListener to an address
-    let listener = TcpListener::bind("127.0.0.1:8080").expect("Failed to bind to address");
-    info!("Listening on 127.0.0.1:8080");
+    let address = format!("127.0.0.1:{}", port);
+    let listener = TcpListener::bind(&address).expect("Failed to bind to address");
+    info!("Listening on {}", address);
 
     // Accept incoming connections
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 info!("New connection: {}", stream.peer_addr().unwrap());
-                if let Err(e) = handle_connection(stream) {
+                if let Err(e) = handle_connection(stream, root) {
                     error!("Error handling connection: {}", e);
                 }
             }
@@ -29,14 +30,14 @@ pub fn start_server() -> Result<()> {
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
+fn handle_connection(mut stream: TcpStream, root: &str) -> std::io::Result<()> {
     let request_str = read_request(&mut stream)?;
     info!("request = {}", request_str);
 
     let request = parse_request(&request_str)?;
     info!("method = {} path = {}", request.method, request.path);
 
-    handle_response(&mut stream, &request)?;
+    handle_response(&mut stream, &request, root)?;
 
     Ok(())
 }
@@ -55,7 +56,7 @@ mod tests {
         // Start the server in a background thread
         thread::spawn(|| {
             // It runs forever, so we don’t join on it
-            start_server().unwrap();
+            start_server(8080, "static").unwrap();
         });
 
         // Give the server time to start
@@ -93,7 +94,7 @@ mod tests {
         // Spawn the server in a separate thread
         thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
-            handle_connection(stream).unwrap();
+            handle_connection(stream, "static").unwrap();
         });
 
         // Simulate a client
