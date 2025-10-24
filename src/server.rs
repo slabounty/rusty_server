@@ -1,29 +1,31 @@
 // src/server.rs
 use std::net::{TcpListener, TcpStream};
+
 use anyhow::Result;
 use log::{info, error};
 
 use crate::request::{read_request, parse_request};
 use crate::response::handle_response;
+use crate::threadpool::ThreadPool;
 
 pub fn start_server(port: u16, root: &str) -> Result<()> {
-    // Bind the TcpListener to an address
     let address = format!("127.0.0.1:{}", port);
-    let listener = TcpListener::bind(&address).expect("Failed to bind to address");
+    let listener = TcpListener::bind(&address)?;
     info!("Listening on {}", address);
 
-    // Accept incoming connections
+    let pool = ThreadPool::new(8);
+
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                info!("New connection: {}", stream.peer_addr().unwrap());
-                if let Err(e) = handle_connection(stream, root) {
-                    error!("Error handling connection: {}", e);
-                }
+                let root = root.to_string();
+                pool.execute(move || {
+                    if let Err(e) = handle_connection(stream, &root) {
+                        error!("Connection error: {}", e);
+                    }
+                });
             }
-            Err(e) => {
-                error!("Error accepting connection: {}", e);
-            }
+            Err(e) => error!("Error accepting connection: {}", e),
         }
     }
 
