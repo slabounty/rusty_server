@@ -1,7 +1,7 @@
 use log::info;
 use std::fs;
 use std::io::{Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::request::HttpRequest;
 
@@ -9,24 +9,10 @@ use crate::request::HttpRequest;
 pub fn handle_response<T: Write>(mut stream: T, request: &HttpRequest, root: &str) -> std::io::Result<()> {
 
     info!("root = {}", root);
-    let path_str = match request.path.as_str() {
-        "/" | "/index" => &format!("{}/index.html", root),
-        other => &format!("{}/{}", root, other.trim_start_matches('/')),
-    };
-    info!("Path = {}", path_str);
-    let path = Path::new(path_str);
+    let path = generate_path(request, root);
+    info!("path = {}", path.display());
 
-
-    // Detect content type
-    let content_type = match path.extension().and_then(|ext| ext.to_str()) {
-        Some("html") => "text/html",
-        Some("css")  => "text/css",
-        Some("js")   => "application/javascript",
-        Some("png")  => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif")  => "image/gif",
-        _ => "application/octet-stream",
-    };
+    let content_type = detect_mime_type(&path);
 
     // Read the file contents as bytes
     let (status_line, body) = match fs::read(&path) {
@@ -47,6 +33,31 @@ pub fn handle_response<T: Write>(mut stream: T, request: &HttpRequest, root: &st
     Ok(())
 }
 
+
+
+fn generate_path(request: &HttpRequest, root: &str) -> PathBuf {
+    let mut path = PathBuf::from(root);
+    let relative = match request.path.as_str() {
+        "/" | "/index" => "index.html",
+        other => other.trim_start_matches('/'),
+    };
+    path.push(relative);
+    info!("Path = {:?}", path);
+    path
+}
+
+fn detect_mime_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("html") => "text/html",
+        Some("css")  => "text/css",
+        Some("js")   => "application/javascript",
+        Some("png")  => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif")  => "image/gif",
+        _ => "application/octet-stream",
+    }
+}
+
 fn handle_404() -> Vec<u8> {
     let path_str = "static/404.html";
     let path = Path::new(path_str);
@@ -65,6 +76,7 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+    use std::path::PathBuf;
 
     /// Helper to run `handle_response` and return the full HTTP response as a String.
     fn run_handle_response(method: &str, path: &str, static_dir: &std::path::Path) -> String {
@@ -230,5 +242,129 @@ mod tests {
             b"<h1>404 Not Found</h1>",
             "Should return default 404 content when file missing"
         );
+    }
+
+    #[test]
+    fn generates_index_for_root() {
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/".to_string(),
+        };
+        let root = "/tmp/site";
+
+        let result = generate_path(&request, root);
+
+        assert_eq!(result, PathBuf::from("/tmp/site/index.html"));
+    }
+
+    #[test]
+    fn generates_index_for_index_path() {
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/index".to_string(),
+        };
+        let root = "/tmp/site";
+
+        let result = generate_path(&request, root);
+
+        assert_eq!(result, PathBuf::from("/tmp/site/index.html"));
+    }
+
+    #[test]
+    fn generates_path_for_static_asset() {
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/css/style.css".to_string(),
+        };
+        let root = "/tmp/site";
+
+        let result = generate_path(&request, root);
+
+        assert_eq!(result, PathBuf::from("/tmp/site/css/style.css"));
+    }
+
+    #[test]
+    fn trims_leading_slashes() {
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "///images/logo.png".to_string(),
+        };
+        let root = "/tmp/site";
+
+        let result = generate_path(&request, root);
+
+        assert_eq!(result, PathBuf::from("/tmp/site/images/logo.png"));
+    }
+
+    #[test]
+    fn test_mime_type_html() {
+        let path = Path::new("somedir/somefile.html");
+
+        let content_type = detect_mime_type(&path);
+
+        assert_eq!(content_type, "text/html", "Expected html mimetype");
+    }
+
+    #[test]
+    fn test_mime_type_css() {
+        let path = Path::new("somedir/somefile.css");
+
+        let content_type = detect_mime_type(&path);
+
+        assert_eq!(content_type, "text/css", "Expected css mimetype");
+    }
+
+    #[test]
+    fn test_mime_type_js() {
+        let path = Path::new("somedir/somefile.js");
+
+        let content_type = detect_mime_type(&path);
+
+        assert_eq!(content_type, "application/javascript", "Expected js mimetype");
+    }
+
+    #[test]
+    fn test_mime_type_png() {
+        let path = Path::new("somedir/somefile.png");
+
+        let content_type = detect_mime_type(&path);
+
+        assert_eq!(content_type, "image/png", "Expected png mimetype");
+    }
+
+    #[test]
+    fn test_mime_type_jpg() {
+        let path = Path::new("somedir/somefile.jpg");
+
+        let content_type = detect_mime_type(&path);
+
+        assert_eq!(content_type, "image/jpeg", "Expected jpg mimetype");
+    }
+
+    #[test]
+    fn test_mime_type_jpeg() {
+        let path = Path::new("somedir/somefile.jpeg");
+
+        let content_type = detect_mime_type(&path);
+
+        assert_eq!(content_type, "image/jpeg", "Expected jpeg mimetype");
+    }
+
+    #[test]
+    fn test_mime_type_gif() {
+        let path = Path::new("somedir/somefile.gif");
+
+        let content_type = detect_mime_type(&path);
+
+        assert_eq!(content_type, "image/gif", "Expected gif mimetype");
+    }
+
+    #[test]
+    fn test_mime_type_other() {
+        let path = Path::new("somedir/somefile.other");
+
+        let content_type = detect_mime_type(&path);
+
+        assert_eq!(content_type, "application/octet-stream", "Expected other mimetype");
     }
 }
